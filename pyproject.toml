@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "blockconvey-monitor"
+version = "0.1.0"
+description = "Production AI agent observability for regulated industries"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Block Convey", email = "arunprasad@blockconvey.com" }]
+dependencies = ["httpx>=0.24.0"]
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.1.0"]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.20.0"]
+all = ["langchain-core>=0.1.0", "openai>=1.0.0", "anthropic>=0.20.0"]
+
+[project.urls]
+Homepage = "https://github.com/Block-Convey/blockconvey-monitor"
+Documentation = "https://docs.blockconvey.com"
