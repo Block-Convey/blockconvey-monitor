@@ -34,20 +34,22 @@ class BlockConveyCallbackHandler:
 
     def on_llm_start(self, serialized, prompts, run_id=None, **kwargs):
         self._start_times[str(run_id)] = time.time()
-        self._inputs[str(run_id)] = prompts
+        if prompts:
+            self._inputs[str(run_id)] = [
+                {"role": "user", "content": p} for p in prompts
+            ]
 
     def on_chat_model_start(self, serialized, messages, run_id=None, **kwargs):
         self._start_times[str(run_id)] = time.time()
         input_msgs = []
-        for msg_list in messages:
-            for msg in msg_list:
-                role = "user"
-                if hasattr(msg, "type"):
-                    role = "assistant" if msg.type == "ai" else msg.type
-                input_msgs.append({
-                    "role": role,
-                    "content": msg.content if hasattr(msg, "content") else str(msg),
-                })
+        if messages:
+            for msg_list in messages:
+                for msg in (msg_list if isinstance(msg_list, list) else [msg_list]):
+                    role = "user"
+                    if hasattr(msg, "type"):
+                        role = "assistant" if msg.type == "ai" else msg.type
+                    content = msg.content if hasattr(msg, "content") else str(msg)
+                    input_msgs.append({"role": role, "content": content})
         self._inputs[str(run_id)] = input_msgs
 
     def on_llm_end(self, response, run_id=None, **kwargs):
