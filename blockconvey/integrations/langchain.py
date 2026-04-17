@@ -1,6 +1,15 @@
 import time
 
 
+_ROLE_MAP = {
+    "human": "user",
+    "ai": "assistant",
+    "system": "system",
+    "function": "function",
+    "tool": "tool",
+}
+
+
 class BlockedByGuardrailError(Exception):
     """
     Raised by BlockConveyCallbackHandler when `blocking=True` and a pre-flight
@@ -53,6 +62,16 @@ class BlockConveyCallbackHandler:
         self.fallback_message = fallback_message
         self._start_times = {}
         self._inputs = {}
+        # Required by LangChain's callback manager — prevents AttributeError
+        # when it checks for these attributes via getattr with raise_error=True
+        self.raise_error = True
+        self.run_inline = True
+        self.ignore_llm = False
+        self.ignore_chat_model = False
+        self.ignore_chain = False
+        self.ignore_agent = False
+        self.ignore_retriever = False
+        self.ignore_custom_event = False
 
     def on_llm_start(self, serialized, prompts, run_id=None, **kwargs):
         self._start_times[str(run_id)] = time.time()
@@ -98,9 +117,8 @@ class BlockConveyCallbackHandler:
         if messages:
             for msg_list in messages:
                 for msg in (msg_list if isinstance(msg_list, list) else [msg_list]):
-                    role = "user"
-                    if hasattr(msg, "type"):
-                        role = "assistant" if msg.type == "ai" else msg.type
+                    raw_role = getattr(msg, "type", "user")
+                    role = _ROLE_MAP.get(raw_role, raw_role)
                     content = msg.content if hasattr(msg, "content") else str(msg)
                     input_msgs.append({"role": role, "content": content})
         self._inputs[str(run_id)] = input_msgs
