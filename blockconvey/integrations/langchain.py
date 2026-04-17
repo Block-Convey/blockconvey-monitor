@@ -1,19 +1,37 @@
 import time
 
 
+class BlockedByGuardrailError(Exception):
+    """
+    Raised by BlockConveyCallbackHandler when `blocking=True` and a pre-flight
+    guardrail check returns `blocked=True`.
+
+    Catch this in your graph node / chain step to return a fallback response
+    without invoking the underlying LLM. The exception message is the
+    fallback_message returned by the PRISMtrace guardrail engine.
+    """
+
+
 class BlockConveyCallbackHandler:
     """
     LangChain callback handler that automatically sends traces
     to PRISMtrace for every LLM call.
 
+    With `blocking=True`, also runs a pre-flight guardrail check before the
+    model starts — if a guardrail rule with action='block' matches the last
+    user message, raises BlockedByGuardrailError instead of proceeding.
+
     Usage:
-        from blockconvey.integrations.langchain import BlockConveyCallbackHandler
+        from blockconvey.integrations.langchain import (
+            BlockConveyCallbackHandler, BlockedByGuardrailError,
+        )
         from langchain_anthropic import ChatAnthropic
 
         handler = BlockConveyCallbackHandler(
             api_key="pt_your-key",
             project_id="your-project-id",
-            agent_name="MyAgent"
+            agent_name="MyAgent",
+            blocking=True,   # enables pre-flight guardrail check
         )
         llm = ChatAnthropic(callbacks=[handler])
     """
@@ -24,11 +42,15 @@ class BlockConveyCallbackHandler:
         project_id=None,
         agent_name=None,
         agent_id=None,
+        blocking: bool = False,
+        fallback_message: str = "I'm not able to help with that request.",
     ):
         from blockconvey.monitor import BlockConveyMonitor
         self.monitor = BlockConveyMonitor(api_key=api_key, project_id=project_id)
         self.agent_name = agent_name
         self.agent_id = agent_id
+        self.blocking = blocking
+        self.fallback_message = fallback_message
         self._start_times = {}
         self._inputs = {}
 
@@ -39,7 +61,38 @@ class BlockConveyCallbackHandler:
                 {"role": "user", "content": p} for p in prompts
             ]
 
+    def _last_human_content(self, messages):
+        """Return the .content of the last human-typed message, or empty string."""
+        last = None
+        if messages:
+            for msg_list in messages:
+                for msg in (msg_list if isinstance(msg_list, list) else [msg_list]):
+                    if getattr(msg, "type", None) == "human":
+                        last = msg
+        if last is None:
+            return ""
+        content = getattr(last, "content", "")
+        # LangChain content can be a list of parts for multimodal — join text parts only.
+        if isinstance(content, list):
+            parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            return " ".join(parts)
+        return content if isinstance(content, str) else str(content)
+
     def on_chat_model_start(self, serialized, messages, run_id=None, **kwargs):
+        # Pre-flight guardrail check (blocking mode). Runs BEFORE any trace
+        # bookkeeping so an exception short-circuits the rest of the callback.
+        if self.blocking:
+            human_text = self._last_human_content(messages)
+            if human_text:
+                result = self.monitor.check(
+                    messages=[{"role": "user", "content": human_text}],
+                    direction="input",
+                )
+                if result.get("blocked"):
+                    raise BlockedByGuardrailError(
+                        result.get("fallback_message") or self.fallback_message
+                    )
+
         self._start_times[str(run_id)] = time.time()
         input_msgs = []
         if messages:

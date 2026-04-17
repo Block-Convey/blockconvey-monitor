@@ -82,6 +82,44 @@ class BlockConveyMonitor:
             pass
         return None
 
+    def check(self, messages: List[Dict], direction: str = "input") -> Dict:
+        """
+        Evaluate messages against guardrail rules BEFORE sending to an LLM.
+
+        Call this as a pre-flight check to enable input blocking. Returns a
+        dict with:
+            { "blocked": bool, "rule_name": str | None, "rule_type": str | None,
+              "matched_text": str | None, "fallback_message": str | None,
+              "latency_ms": int }
+
+        Fails open — if the PRISMtrace endpoint is unreachable (network error,
+        timeout, 5xx, invalid JSON), returns {"blocked": False, "latency_ms": <elapsed>}
+        and never raises. The 2-second timeout caps total wait so the check
+        cannot stall the client app.
+
+        Example:
+            result = monitor.check(messages=[{"role": "user", "content": user_input}])
+            if result["blocked"]:
+                return result.get("fallback_message", "Request blocked.")
+        """
+        start = time.time()
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/guardrails/evaluate",
+                json={
+                    "api_key": self.api_key,
+                    "project_id": self.project_id,
+                    "messages": messages,
+                    "direction": direction,
+                },
+                timeout=2,
+            )
+            result = resp.json() if resp.status_code == 200 else {"blocked": False}
+        except Exception:
+            result = {"blocked": False}
+        result["latency_ms"] = int((time.time() - start) * 1000)
+        return result
+
     def monitor_openai(self, client):
         """Wrap an OpenAI client to auto-trace all completions."""
         from blockconvey.integrations.openai import wrap_openai
